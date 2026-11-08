@@ -107,14 +107,24 @@ window.__ModuleLoader__.load({
     function resolveServices(ctx) {
       const services = { credentials: void 0 }
       if (ctx === null || typeof ctx !== 'object') return services
-      const get = typeof ctx.get === 'function' ? (name) => {
+      // 注意：cordis 的插件上下文是 Proxy —— 取一个没写进 inject 的服务名会**抛错**
+      // （`cannot get property "remote" without inject`），不是返回 undefined。
+      // 所以两条取法都必须包在 try 里，否则一次取不到就把整个 web boot 打崩。
+      const get = (name) => {
         try {
-          return ctx.get(name)
+          return typeof ctx.get === 'function' ? ctx.get(name) : void 0
         } catch (error) {
           return void 0
         }
-      } : () => void 0
-      const remote = ctx.remote !== void 0 ? ctx.remote : get('remote')
+      }
+      const property = (name) => {
+        try {
+          return ctx[name]
+        } catch (error) {
+          return void 0
+        }
+      }
+      const remote = property('remote') !== void 0 ? property('remote') : get('remote')
       const direct = get('remote.credentials')
       const credentials = remote !== void 0 && remote !== null && remote.credentials !== void 0
         ? remote.credentials
@@ -363,41 +373,59 @@ window.__ModuleLoader__.load({
     }
 
     function apply(ctx) {
-      const slots = ctx !== void 0 && ctx !== null && typeof ctx.get === 'function' ? ctx.get('slots')
-        : ctx !== void 0 && ctx !== null ? ctx.slots : void 0
-      if (slots === void 0 || slots === null || typeof slots.register !== 'function') {
-        console.warn('[ark-plan-api] 宿主没有 slots 服务，「填 API Key」页未注册')
-        return
-      }
-      const services = resolveServices(ctx)
-      const Page = createPage(services)
-      const disposers = []
-      const handle = slots.inject(SLOT_NAME, () => slots.register({
-        name: SLOT_NAME,
-        key: ROW_KEY,
-      }, (props) => {
-        const view = props !== void 0 && props !== null ? props.view : void 0
-        if (view === 'summary') return SUMMARY_LABEL
-        return h(Page, null)
-      }))
-      for (const dispose of extractDisposers(handle)) disposers.push(dispose)
-      if (typeof ctx.effect === 'function') {
-        ctx.effect(() => () => {
-          for (const dispose of disposers.splice(0)) {
+      // 这里必须整体兜住异常：DSH 的 web 端把「某个插件 apply 抛错」当成致命错误，
+      // 整个界面会停在 "Failed to load plugins / ark-plan-api: failed" —— 一个填
+      // Key 的页面不该有把宿主打崩的权力。出错就记一条 console.error，然后安静退出。
+      try {
+        const slots = ctx !== void 0 && ctx !== null && typeof ctx.get === 'function' ? ctx.get('slots')
+          : (() => {
             try {
-              dispose()
+              return ctx !== void 0 && ctx !== null ? ctx.slots : void 0
             } catch (error) {
-              /* 已经卸掉了 */
+              return void 0
             }
-          }
-        }, 'ark-plan-api:row-config')
+          })()
+        if (slots === void 0 || slots === null || typeof slots.register !== 'function') {
+          console.warn('[ark-plan-api] 宿主没有 slots 服务，「填 API Key」页未注册')
+          return
+        }
+        const services = resolveServices(ctx)
+        const Page = createPage(services)
+        const disposers = []
+        const handle = slots.inject(SLOT_NAME, () => slots.register({
+          name: SLOT_NAME,
+          key: ROW_KEY,
+        }, (props) => {
+          const view = props !== void 0 && props !== null ? props.view : void 0
+          if (view === 'summary') return SUMMARY_LABEL
+          return h(Page, null)
+        }))
+        for (const dispose of extractDisposers(handle)) disposers.push(dispose)
+        if (typeof ctx.effect === 'function') {
+          ctx.effect(() => () => {
+            for (const dispose of disposers.splice(0)) {
+              try {
+                dispose()
+              } catch (error) {
+                /* 已经卸掉了 */
+              }
+            }
+          }, 'ark-plan-api:row-config')
+        }
+      } catch (error) {
+        const detail = String((error && error.stack) || error)
+        window.__ARK_PLAN_API_ERROR__ = detail
+        console.error('[ark-plan-api] 注册「填 API Key」页失败，插件已跳过（不影响宿主启动）：' + detail)
       }
     }
 
     exports.name = PACKAGE_NAME
-    // remote.credentials 必须写进 inject：不声明的话 ctx.remote 是空的，
-    // 页面就只能落到「去设置 → 模型 填」的提示上（官方 Models 页也是这么声明的）。
-    exports.inject = ['slots', 'remote.credentials']
+    // inject 三件事都不能少：
+    // - slots：插槽注册表；
+    // - remote：cordis 的上下文是 Proxy，**没声明就取 ctx.remote 会直接抛**
+    //   `cannot get property "remote" without inject`（0.2.0 崩溃的真因）；
+    // - remote.credentials：凭据服务，官方 Models 页也是这么声明的。
+    exports.inject = ['slots', 'remote', 'remote.credentials']
     exports.apply = apply
     exports.__test = {
       ROUTES,

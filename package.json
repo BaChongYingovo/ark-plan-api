@@ -1,6 +1,6 @@
 {
   "name": "ark-plan-api",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Ark Plan API plugin for DeepSeek Harness (DSH): auto-configures Volcengine Ark Agent Plan / Coding Plan / 后付费 providers on the native pi-ai adapter so they appear in the model picker. Default wire protocol is the Anthropic Messages API; the user only supplies an API key.",
   "type": "module",
   "license": "MIT",

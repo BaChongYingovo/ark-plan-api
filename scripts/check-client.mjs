@@ -103,6 +103,7 @@ try {
 
 assert(typeof mod?.name === 'string' && mod.name === pkg.name, `导出 name = ${mod?.name}`)
 assert(Array.isArray(mod?.inject) && mod.inject.includes('slots'), '导出 inject 含 slots')
+assert(Array.isArray(mod?.inject) && mod.inject.includes('remote'), '导出 inject 含 remote（0.2.0 缺它就崩）')
 assert(Array.isArray(mod?.inject) && mod.inject.includes('remote.credentials'), '导出 inject 含 remote.credentials')
 assert(typeof mod?.apply === 'function', '导出 apply 函数')
 assert(mod?.__test !== undefined, '导出 __test（给本自检用）')
@@ -162,6 +163,26 @@ assert(
   registrations[0]?.entry?.key === `${pkg.name}#${pkg.name}`,
   `注册 key = ${registrations[0]?.entry?.key}（应为 <包名>#<行 id>）`,
 )
+
+// 回归（0.2.0 真机崩溃）：cordis 的插件上下文是 Proxy，取一个没写进 inject 的服务名
+// 会**抛** `cannot get property "remote" without inject`。这层异常绝不能冒到宿主 ——
+// 宿主把它当成致命 boot 错误，整个界面停在 "Failed to load plugins"。
+const throwingCtx = new Proxy(
+  { get(name) { return name === 'slots' ? fakeSlots : undefined }, effect() {} },
+  {
+    get(target, prop, receiver) {
+      if (prop in target) return Reflect.get(target, prop, receiver)
+      throw new Error(`cannot get property "${String(prop)}" without inject`)
+    },
+  },
+)
+const beforeThrowy = registrations.length
+try {
+  mod.apply(throwingCtx)
+} catch (err) {
+  fail(`apply 把异常抛给了宿主（会打崩 web boot）：${err.message}`)
+}
+assert(registrations.length === beforeThrowy + 1, 'apply 在代理上下文里仍然完成注册')
 
 const summary = registrations[0]?.render({ view: 'summary', t: (key) => key })
 assert(typeof summary === 'string' && summary.length > 0, `summary 视图返回文案："${summary}"`)

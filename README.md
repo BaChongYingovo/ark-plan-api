@@ -174,6 +174,12 @@ Key 属于哪个套餐就选哪个 route。拿 Agent Plan 的 Key 去调 `ark-cn
 **填完 Key 还要重启吗？**
 不用。凭据是运行时读取的；只要插件本身是这次启动时装进去的（首次安装需要重启宿主让它加载 `client.js`），之后填 Key 立即生效。
 
+**装完 DSH 起不来，界面停在 “Failed to load plugins / ark-plan-api: failed”？**
+那是 0.2.0 的 bug：`client.js` 读了 `ctx.remote` 却没在 `inject` 里声明 `remote`，cordis 的上下文是 Proxy，
+取未声明的服务名会抛错，宿主把插件 `apply` 抛错当成致命 boot 错误。**升级到 0.2.1** 即可；临时救急的办法是把
+`ark-plan-api` 从 profile `package.json` 的 `dsh.profile.bundles` 里去掉再启动。0.2.1 起 `apply` 全程兜住异常，
+插件自己出问题只会打印一条 `console.error`，不会再拦住宿主启动。
+
 **会覆盖我自己加的 provider 吗？**
 不会。这些只是 base 层默认值，与你在 UI 里加的 provider 逐键深合并；同名 route 时你的设置优先。
 
@@ -224,7 +230,7 @@ npm pack               # 打 tarball
 
 ## 验证记录
 
-在已安装的 **DeepSeek Harness.app**（`@deepseek-ai/dsh@0.1.0-rc.5`、`@earendil-works/pi-ai@0.82.1`）上验证：
+在已安装的 **DeepSeek Harness.app**（`@deepseek-ai/dsh-desktop@0.2.1-rc.5`、Electron 44.7.0、node 24.21.0）上验证：
 
 - 5 个 route 均通过 schema 与可服务性校验，正常出现在 `ctx.llm.listConfigurableProviders()` / `listProviders()` / `listModels()`；
 - `dsh --dump-config` 显示该行 *patched by ark-plan-api*；
@@ -238,6 +244,18 @@ npm pack               # 打 tarball
   保存/清除真的调到假凭据服务（ref 与 trim 后的值都对）、宿主拒绝与抛错都被兜住；
 - 密钥扫描：工作区 12 个文件 + `*.tgz` + git 全部历史，0 命中；
 - 真机渲染（重启宿主后目视确认按钮与卡片）留待使用者确认，不在本仓库的自动校验范围内。
+
+0.2.1 崩溃修复的真机验证（隔离 `DSH_HOME`，独立端口，未动正在用的实例）：
+
+- 复现：0.2.0 装进测试 profile 后 web 端 boot 失败，renderer 抛
+  `Error: cannot get property "remote" without inject`，界面渲染 “Failed to load plugins / ark-plan-api: failed”，`#root` 被加 `inert`；
+- 修复后同环境重新启动：boot 成功，页面正常渲染；侧栏 **插件** → `ark-plan-api` 卡片 → **查看** → 组件行出现
+  `aria-label="配置 ark-plan-api"` 的可点按钮；
+- 点开行配置页：标题「火山方舟 API Key」、5 张卡片（`ark-agent-plan-cn` / `ark-coding-plan-cn` /
+  `ark-coding-plan-byteplus` / `ark-cn` / `ark-byteplus`）、每张显示凭据名与「未配置」、5 个 `type=password` 输入框；
+- 在 `ark-agent-plan-cn` 卡片里填测试值后点「保存」：状态变「已配置」并提示「已保存到凭据库」；
+  点「清除」：回到「未配置」并提示「已清除」——Key 全程只进 `$DSH_HOME/.credentials.yaml`；
+- 无浏览器控制台异常，`window.__ARK_PLAN_API_ERROR__` 为空。
 
 ## 安全说明
 

@@ -1,6 +1,20 @@
 # Changelog
 
-本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
+本项目遵循 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)。
+
+## 0.2.1 — 2026-11-08
+
+修 0.2.0 会导致 **DSH 启动失败**的崩溃：浏览器半侧读 `ctx.remote` 时没有在 `inject` 里声明 `remote`。
+
+- cordis 的插件上下文是 Proxy，取一个没写进 `plugin.inject` 的服务名会**抛错**而不是返回 `undefined`
+  （`Error: cannot get property "remote" without inject`）；这个异常冒到 web 宿主，被当成致命
+  boot 错误，界面停在 “Failed to load plugins / ark-plan-api: failed”；
+- `exports.inject` 补齐为 `["slots", "remote", "remote.credentials"]`；
+- `resolveServices` 取服务的每一处都包 try/catch，取不到就降级（页面提示去「设置 → 模型」填），不抛；
+- `apply` 整体兜住异常：注册失败只写 `console.error` + `window.__ARK_PLAN_API_ERROR__`，**不再让插件
+  有权打断宿主启动**——一个填 Key 的页面不该把整个界面弄崩；
+- `scripts/check-client.mjs` 增加两条回归：`inject` 必须含 `remote`；用「取未声明属性就抛」的 Proxy
+  当 ctx 调 `apply`，断言既不抛错、仍完成注册。
 
 ## 0.2.0 — 2026-11-08
 
