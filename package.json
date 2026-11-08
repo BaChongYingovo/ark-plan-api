@@ -1,0 +1,59 @@
+{
+  "name": "ark-plan-api",
+  "version": "0.1.0",
+  "description": "Ark Plan API plugin for DeepSeek Harness (DSH): auto-configures Volcengine Ark Agent Plan / Coding Plan / 后付费 providers on the native pi-ai adapter so they appear in the model picker. Default wire protocol is the Anthropic Messages API; the user only supplies an API key.",
+  "type": "module",
+  "license": "MIT",
+  "author": "BaChongYingovo",
+  "main": "./index.js",
+  "keywords": [
+    "deepseek-harness",
+    "dsh-plugin",
+    "dsh-bundle",
+    "ark",
+    "volcengine",
+    "byteplus",
+    "doubao",
+    "llm-provider"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BaChongYingovo/ark-plan-api.git"
+  },
+  "homepage": "https://github.com/BaChongYingovo/ark-plan-api#readme",
+  "bugs": {
+    "url": "https://github.com/BaChongYingovo/ark-plan-api/issues"
+  },
+  "scripts": {
+    "check": "node scripts/check.mjs",
+    "test": "node scripts/check.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": "./index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  }
+}
