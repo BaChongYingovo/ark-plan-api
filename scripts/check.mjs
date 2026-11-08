@@ -18,6 +18,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const PROVIDER_IDS = new Set()
+const PATCH_REFS = new Set()
 const problems = []
 const lines = []
 
@@ -153,6 +154,7 @@ if (existsSync(patchPath)) {
           '（否则 UI 里保存的 Key 读不到）',
       )
     }
+    if (apiKeyEnv) PATCH_REFS.add(apiKeyEnv)
     if (api && !ALLOWED_APIS.has(api)) {
       fail(`${where} 的 api 取值未知：${api}（可用：${[...ALLOWED_APIS].join(' / ')}）`)
     }
@@ -227,6 +229,73 @@ if (existsSync(patchPath)) {
 
   if (summaries.length) {
     ok(`解析到 ${summaries.length} 个 route、${summaries.reduce((n, s) => n + s.models, 0)} 条模型`)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 4. 客户端半侧：插件页里的「填 API Key」表单
+// ---------------------------------------------------------------------------
+/** patch 里 insert 的载体行 id —— 填 Key 页的注册 key 前缀必须与它一致。 */
+const patchInsertId = () => {
+  const patch = path.join(ROOT, pkg?.dsh?.bundle?.patch ?? 'cordis.patch.yml')
+  if (!existsSync(patch)) return undefined
+  const m = readFileSync(patch, 'utf8').match(/-\s*insert:\s*\n\s*-\s*id:\s*([\w.-]+)/)
+  return m ? m[1] : undefined
+}
+
+const clientRel = normalize(pkg?.exports?.['./client'] ?? '')
+if (pkg?.dsh?.client === undefined) {
+  lines.push('  · 未声明 dsh.client（这个插件没有浏览器半侧）')
+} else {
+  if (pkg.dsh.client.platform !== 'web') {
+    fail(`dsh.client.platform 应为 web，实际为 ${pkg.dsh.client.platform}`)
+  }
+  if (!clientRel) {
+    fail('声明了 dsh.client，但 exports 里没有 "./client"（浏览器半侧不会被提供）')
+  } else if (!existsSync(path.join(ROOT, clientRel))) {
+    fail(`exports["./client"] 指向的文件不存在：${clientRel}`)
+  } else {
+    const clientPath = path.join(ROOT, clientRel)
+    const clientText = readFileSync(clientPath, 'utf8')
+
+    if (!/window\.__ModuleLoader__\.load\(/.test(clientText)) {
+      fail(`${clientRel} 不是 DSH 的 client bundle 形式（缺少 window.__ModuleLoader__.load）`)
+    }
+
+    const strConst = (name) => {
+      const m = clientText.match(new RegExp(`const ${name} = '([^']*)'`))
+      return m ? m[1] : undefined
+    }
+    const clientPkg = strConst('PACKAGE_NAME')
+    const clientRow = strConst('ROW_ID')
+    const clientSlot = strConst('SLOT_NAME')
+
+    if (clientPkg === undefined || clientRow === undefined) {
+      fail(`${clientRel} 里找不到 PACKAGE_NAME / ROW_ID 常量`)
+    }
+    if (clientSlot !== 'plugins.row.config') {
+      fail(`${clientRel} 注册的插槽应为 plugins.row.config，实际为 ${clientSlot}`)
+    }
+
+    const insertId = patchInsertId()
+    if (clientPkg !== undefined && pkg.name !== undefined && clientPkg !== pkg.name) {
+      fail(`填 Key 页的 PACKAGE_NAME (${clientPkg}) 与 package.json 的 name (${pkg.name}) 不一致`)
+    }
+    if (clientRow !== undefined && insertId !== undefined && clientRow !== insertId) {
+      fail(`填 Key 页的 ROW_ID (${clientRow}) 与 patch 载体行 id (${insertId}) 不一致`)
+    }
+
+    // 页面上的每个 route 都必须真实存在，且 ref 与 apiKeyEnv 一一对上
+    const clientRefs = [...clientText.matchAll(/^\s*ref: '([A-Z0-9_]+)',$/gm)].map((m) => m[1])
+    if (clientRefs.length === 0) fail(`${clientRel} 里没有解析到任何 route ref`)
+    for (const ref of clientRefs) {
+      if (!PATCH_REFS.has(ref)) fail(`填 Key 页列出的 ${ref} 在 patch 里不存在`)
+    }
+    for (const ref of PATCH_REFS) {
+      if (!clientRefs.includes(ref)) fail(`patch 的 ${ref} 没有出现在填 Key 页（用户没法在这里配）`)
+    }
+    if (clientRefs.length) ok(`填 Key 页：${clientRefs.length} 个 route，ref 与 patch 完全一致`)
+    ok(`client 半侧：${clientRel}（插槽 ${clientSlot}，key ${clientPkg}#${clientRow}）`)
   }
 }
 

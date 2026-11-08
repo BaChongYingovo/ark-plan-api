@@ -90,7 +90,20 @@ dsh --profile desktop --dump-config | grep -A2 llm-pi-ai     # 应看到 "patche
 
 ## 填 API Key
 
-启动后打开 **设置 → 模型（Models）**，选中一个 Ark route（例如 *Ark Agent Plan*），粘贴对应套餐的 Key 即可，随后就能在对话框里选该 provider 下的模型。
+装好后有两条路，写进去的是同一份凭据库（`$DSH_HOME/.credentials.yaml`），随便选一条：
+
+**① 插件自带的「填 API Key」页（推荐）**
+
+侧栏 **插件** 页 → 插件列表 → 找到 `ark-plan-api` 这一行 → 点行尾的 **填 API Key**：
+
+- 按套餐分成 5 张卡片（Agent Plan / Coding Plan 国内 / Coding Plan BytePlus / 后付费国内 v3 / 后付费 BytePlus），一张卡一条 Key；
+- 每条都显示凭据名（如 `ARK_AGENT_PLAN_CN_API_KEY`）和「已配置 / 未配置」，页面**不回显** Key；
+- 点「保存」即时写入凭据服务，不用重启，「设置 → 模型」那边立刻能读到；点「清除」删除；
+- Key 只进凭据库：不写进插件文件、不写进 profile 配置、不进日志。
+
+**② 设置 → 模型（Models）**
+
+选中一个 Ark route（例如 *Ark Agent Plan*），粘贴对应套餐的 Key，和配置官方 provider 一样。两条路等价 —— 只是这个页面把 5 个套餐的凭据名摆在一起，不用猜该填哪个。
 
 Key 的落点由每个 route 的 `apiKeyEnv` 决定，用的是 DSH 的派生规则：
 
@@ -99,7 +112,7 @@ PROVIDER_ID.toUpperCase().replace(/[^A-Z0-9]+/g, '_') + '_API_KEY'
 // ark-agent-plan-cn -> ARK_AGENT_PLAN_CN_API_KEY
 ```
 
-所以在 UI 里保存的 Key 会正好写进 route 读取的凭据名（`$DSH_HOME/.credentials.yaml`）。你也可以改用环境变量提供同名 Key，例如 `ARK_AGENT_PLAN_CN_API_KEY=...`。
+所以无论从哪条路保存，Key 都会正好写进 route 读取的凭据名。你也可以改用环境变量提供同名 Key，例如 `ARK_AGENT_PLAN_CN_API_KEY=...`（存储值优先于环境变量）。
 
 各套餐 Key 的获取入口（火山方舟控制台）：
 
@@ -118,6 +131,8 @@ DSH 以"休眠"状态挂载了 `@deepseek-ai/dsh-llm-pi-ai`（零 provider）。
    - 你在 yaml 里覆盖某个 route 的字段，只影响那个 route。
 
 行 patch 会整行替换目标行的 `config`；`dsh-base` 挂载 `llm-pi-ai` 时没有 config，所以这里只写 `providers` 是安全的。
+
+浏览器半侧（`client.js`）只负责 **填 API Key 那一页**：它向插件管理页的 `plugins.row.config` 插槽注册 `ark-plan-api#ark-plan-api`，页面用宿主的 `ctx.remote.credentials`（`describe` / `set` / `unset`）读写凭据库。也就是说 Key 走的是 DSH 自己的凭据服务 —— 插件不碰 `.credentials.yaml`，不自己存 Key，也不把 Key 写进任何配置。宿主没暴露凭据服务时，页面会明说「只能在设置 → 模型里填」，而不是假装保存成功。
 
 ## 自定义
 
@@ -153,6 +168,12 @@ ark-cn:
 **401 / 模型不存在？**
 Key 属于哪个套餐就选哪个 route。拿 Agent Plan 的 Key 去调 `ark-cn`（后付费）会认证失败，反之亦然。
 
+**「填 API Key」页在哪？点了没反应？**
+在侧栏 **插件** 页的插件列表里，`ark-plan-api` 那一行的行尾（设置 → 插件 里那份是只读清单，没有按钮）。行尾按钮不出现时，通常是宿主版本较老、没有 `plugins.row.config` 这个插槽 —— 那时用 **设置 → 模型** 填，效果一样。页面顶部若提示「没有把凭据服务暴露给插件」，同理，去模型页填。
+
+**填完 Key 还要重启吗？**
+不用。凭据是运行时读取的；只要插件本身是这次启动时装进去的（首次安装需要重启宿主让它加载 `client.js`），之后填 Key 立即生效。
+
 **会覆盖我自己加的 provider 吗？**
 不会。这些只是 base 层默认值，与你在 UI 里加的 provider 逐键深合并；同名 route 时你的设置优先。
 
@@ -161,22 +182,45 @@ Key 属于哪个套餐就选哪个 route。拿 Agent Plan 的 Key 去调 `ark-cn
 
 ## 开发与自检
 
-无第三方依赖，不需要构建。
+无第三方依赖，不需要构建（`client.js` 是手写 bundle，React 由宿主提供）。
 
 ```sh
-npm run check     # 结构自检：入口可加载、patch 可解析、route/Key 名/模型字段自洽
-npm pack          # 打 tarball
+npm run check          # 结构自检：入口可加载、patch 可解析、route/Key 名/模型字段自洽
+npm run check:client   # 浏览器半侧自检：假 window / 假 React / 假凭据服务真跑一遍
+npm run check:secrets  # 密钥扫描：工作区 + npm pack 产物 + git 全部历史
+npm test               # 上面三个一起跑
+npm pack               # 打 tarball
 ```
 
-`scripts/check.mjs` 校验项：
+`scripts/check.mjs` 校验项（结构）：
 
 - `index.js` 可 import，导出 `name` 与 `apply`；
-- `package.json` 的 `dsh.bundle.patch` 指向真实文件，`files` 覆盖入口/patch/文档；
+- `package.json` 的 `dsh.bundle.patch` 指向真实文件，`files` 覆盖入口/patch/文档/client；
 - patch 里每个 route 都有 `displayName` / `apiKeyEnv` / `api` / `baseURL` / `models`；
 - `apiKeyEnv` 与 provider id 严格符合 DSH 的派生规则（否则 UI 里保存的 Key 会读不到）；
 - `baseURL` 是 https 且不带 `/v1` 后缀；
 - 每个模型都有 `id` / `name` / 正整数 `contextWindow` / 正整数 `maxTokens` / 合法 `input`；
-- provider id、模型 id 在各自作用域内不重复。
+- provider id、模型 id 在各自作用域内不重复；
+- 浏览器半侧：`dsh.client.platform` 为 web、`exports["./client"]` 指向真实文件、bundle 走 `window.__ModuleLoader__.load`、注册的插槽与 key 和 patch 里的行 id 对得上、`client.js` 里的凭据名与 patch 的 `apiKeyEnv` 双向一致。
+
+`scripts/check-client.mjs` 校验项（行为，不需要浏览器）：
+
+- bundle 的 id / factory / 导出（`name` / `inject` / `apply`）形状正确；
+- 真的注册到了 `plugins.row.config`，key 是 `<包名>#<行 id>`；
+- 五个 route 的凭据名都等于派生规则结果；
+- 页面画得出来：5 张卡片、5 个 baseURL、5 个凭据名、保存/清除按钮、Key 落点说明；
+- 保存走 `credentials.set(ref, 值)`（值会 trim）、空值不提交、宿主拒绝时原样透出错误、抛错被兜住；
+- 清除走 `credentials.unset(ref)`；状态读取把 `configured` / `missing` / `unknown` 分得清；
+- 拿不到凭据服务时，页面给的是「去设置 → 模型」的提示，而不是白屏或假成功。
+
+`scripts/scan-secrets.mjs` 校验项（不泄漏）：
+
+- 工作区与 `*.tgz` 里没有形如 `ark-` + 40 位、`sk-` + 24 位、UUID 的字符串；
+- 没有 `ARK_XXX_API_KEY = <真值>` 这种把 Key 写进配置的写法；
+- **git 全部历史**里也没有（含已删除的提交）；
+- 没有任何 `.credentials.yaml` / `.env` 被跟踪。
+
+> 判定规则故意收紧：provider id（如 `ark-coding-plan-byteplus`，`ark-` 后 24 位）不算命中，只认真实 Key 的长度。
 
 ## 验证记录
 
@@ -187,9 +231,19 @@ npm pack          # 打 tarball
 - 装入 bundle 后 web host 干净启动（无 loader 报错）；
 - 用真实 Key 对 `ark-agent-plan-cn`（`doubao-seed-evolving`，`anthropic-messages`）**实测调通**，返回正文 + CoT 思考块。
 
+0.2.0 新增的填 Key 页（`npm test` 三个自检）：
+
+- 结构自检：6 组断言全过（入口、patch、5 route / 24 模型、client 半侧、插槽 key、凭据名对齐）；
+- 浏览器半侧自检：68 条断言全过 —— 假 window 抓到 bundle 定义、假 React 渲染出 5 张卡片、
+  保存/清除真的调到假凭据服务（ref 与 trim 后的值都对）、宿主拒绝与抛错都被兜住；
+- 密钥扫描：工作区 12 个文件 + `*.tgz` + git 全部历史，0 命中；
+- 真机渲染（重启宿主后目视确认按钮与卡片）留待使用者确认，不在本仓库的自动校验范围内。
+
 ## 安全说明
 
 - 仓库不含任何 API Key；Key 由使用者在本地填写，落在 `$DSH_HOME/.credentials.yaml` 或环境变量。
+- 插件不会把 Key 写进 `cordis.patch.yml` / profile 配置 / 日志：`index.js` 是空函数，填 Key 的页面只调用宿主的凭据服务，页面永不回显已保存的值。
+- `npm run check:secrets` 会扫工作区、`*.tgz` 和 **git 全部历史**，提交前跑一遍（`npm test` 里已包含）。
 - 请勿把 `--dump-config` 的完整输出或 `.credentials.yaml` 贴到 issue 里。
 
 ## License
